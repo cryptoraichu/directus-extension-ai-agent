@@ -1,8 +1,8 @@
 {
   "name": "directus-extension-ai-agent",
-  "description": "Please enter a description for your extension",
+  "description": "Transform your Directus CMS with intelligent automation, smart data interpretation, and natural language processing.",
   "icon": "extension",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "keywords": [
     "directus",
     "directus-extension",
@@ -14,7 +14,7 @@
   "files": [
     "dist"
   ],
-  "author":"Uncw3b Software Development",
+  "author": "Uncw3b Software Development",
   "repository": {
     "type": "git",
     "url": "https://github.com/cryptoraichu/directus-extension-ai-agent"
