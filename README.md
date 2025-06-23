@@ -2,7 +2,8 @@
 
 Transform your Directus CMS with intelligent automation, smart data interpretation, and natural language processing.
 
-![Hero Placeholder](./images/hero-placeholder.png)
+<img width="884" alt="ai-agent-ss0" src="https://github.com/user-attachments/assets/06424e0f-ef96-4250-9885-82c6532e3d27" />
+
 
 ## ✨ Features
 
@@ -65,7 +66,7 @@ The extension creates a **settings collection** after install.
 
 Settings panel is embedded in the UI.
 
-![Settings Placeholder](./images/settings-placeholder.png)
+![your directus url here](https://github.com/user-attachments/assets/1da9b524-822a-4dbc-a4b8-216b4c91cd7f)
 
 ---
 
@@ -81,7 +82,7 @@ Open the **AI Agent** module in Directus. Use prompts like:
 
 AI will process the prompt and return or execute it with context awareness.
 
-![Chat UI Placeholder](./images/chat-ui-placeholder.png)
+<img width="1274" alt="ai-agent-ss2" src="https://github.com/user-attachments/assets/4c1d3f1b-e700-4277-91a3-b410db314b57" />
 
 ---
 
@@ -96,11 +97,11 @@ AI will process the prompt and return or execute it with context awareness.
 
 ## 📸 Screenshots
 
-Please include the following (placeholders available):
+<img width="1279" alt="111" src="https://github.com/user-attachments/assets/751bfc7e-f8b6-4f78-8c10-dd2c8236166e" />
+<img width="1277" alt="ai-agent-ss1" src="https://github.com/user-attachments/assets/f1936773-15ca-4c32-8aa9-0c58aefe61ce" />
+<img width="1274" alt="ai-agent-ss2" src="https://github.com/user-attachments/assets/9782360e-ff03-47ec-af38-debb9b84a364" />
+<img width="1277" alt="ai-agent-ss3" src="https://github.com/user-attachments/assets/4bcf7e91-015c-4efb-a87c-2c6ef41a3565" />
 
-- Hero section: `images/hero-placeholder.png`
-- Settings panel: `images/settings-placeholder.png`
-- Chat interface: `images/chat-ui-placeholder.png`
 
 ---
 
