@@ -1,0 +1,69 @@
+{
+  "name": "directus-extension-ai-agent",
+  "description": "Please enter a description for your extension",
+  "icon": "extension",
+  "version": "1.0.0",
+  "keywords": [
+    "directus",
+    "directus-extension",
+    "directus-extension-bundle",
+    "openai",
+    "ai-agent"
+  ],
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "directus:extension": {
+    "type": "bundle",
+    "path": {
+      "app": "dist/app.js",
+      "api": "dist/api.js"
+    },
+    "entries": [
+      {
+        "type": "endpoint",
+        "name": "mcp-server",
+        "source": "src/mcp-server/index.js"
+      },
+      {
+        "type": "module",
+        "name": "agent-frontend",
+        "source": "src/agent-frontend/index.js"
+      }
+    ],
+    "host": "^10.0.0 || ^11.0.0",
+    "sandbox": {
+      "enabled": true,
+      "requestedScopes": {
+        "log": {},
+        "sleep": {},
+        "request": {
+          "methods": [
+            "GET",
+            "POST"
+          ],
+          "urls": [
+            "https://api.openai.com/*",
+            "https://*.openrouter.ai/*"
+          ]
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "directus-extension build",
+    "dev": "directus-extension build -w --no-minify",
+    "link": "directus-extension link",
+    "validate": "directus-extension validate",
+    "add": "directus-extension add"
+  },
+  "devDependencies": {
+    "@directus/extensions-sdk": "13.1.1",
+    "vue": "^3.5.17"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2",
+    "openai": "^5.6.0"
+  }
+}
