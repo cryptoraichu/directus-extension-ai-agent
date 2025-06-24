@@ -3,6 +3,7 @@
   "description": "Transform your Directus CMS with intelligent automation, smart data interpretation, and natural language processing.",
   "icon": "extension",
   "version": "1.0.2",
+  "license": "GPL-3.0-or-later",
   "keywords": [
     "directus",
     "directus-extension",
