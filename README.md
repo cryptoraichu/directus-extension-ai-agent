@@ -4,7 +4,6 @@ Transform your Directus CMS with intelligent automation, smart data interpretati
 
 <img width="884" alt="ai-agent-ss0" src="https://github.com/user-attachments/assets/06424e0f-ef96-4250-9885-82c6532e3d27" />
 
-
 ## ✨ Features
 
 - 💬 **Natural Language Commands**  
@@ -101,7 +100,6 @@ AI will process the prompt and return or execute it with context awareness.
 <img width="1277" alt="ai-agent-ss1" src="https://github.com/user-attachments/assets/f1936773-15ca-4c32-8aa9-0c58aefe61ce" />
 <img width="1274" alt="ai-agent-ss2" src="https://github.com/user-attachments/assets/9782360e-ff03-47ec-af38-debb9b84a364" />
 <img width="1277" alt="ai-agent-ss3" src="https://github.com/user-attachments/assets/4bcf7e91-015c-4efb-a87c-2c6ef41a3565" />
-
 
 ---
 
