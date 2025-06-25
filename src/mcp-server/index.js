@@ -313,8 +313,9 @@ async function executeManualToolCall(content) {
   }
 }
 
-export default (router, { services, getSchema }) => {
-  const { CollectionsService, FieldsService, ItemsService } = services;
+export default (router, context) => {
+  const { services, getSchema, database } = context;
+  const { ItemsService, UtilsService } = services;
   let initPromise = null;
   let tableCreated = false; // Flag to create only once
 
@@ -346,79 +347,126 @@ export default (router, { services, getSchema }) => {
     };
     return currentSettings;
   }
-
-  // Table creation - FIXED
   async function createSettingsTable() {
     if (tableCreated) return;
 
-    console.log("🔧 Creating settings table...");
+    console.log("🔧 Creating settings table with raw SQL...");
 
     try {
-      // 1. Create collection
-      const collectionsService = new CollectionsService({
-        schema: await getSchema(),
-      });
+      const tableExists = await database.raw(`
+        SELECT COUNT(*) as count 
+        FROM information_schema.tables 
+        WHERE table_schema = DATABASE() 
+        AND table_name = 'ai_agent_settings'
+      `);
 
-      await collectionsService.createOne({
-        collection: "ai_agent_settings",
-        meta: {
-          collection: "ai_agent_settings",
-          icon: "settings",
-          note: "AI Agent settings",
-          singleton: true,
-        },
-        schema: { name: "ai_agent_settings" },
-      });
-      console.log("✅ Collection created");
+      if (tableExists[0][0].count > 0) {
+        console.log("✅ Settings table already exists");
+      } else {
+        await database.raw(`
+          CREATE TABLE IF NOT EXISTS ai_agent_settings (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            directus_url VARCHAR(255),
+            admin_token TEXT,
+            ai_model VARCHAR(100),
+            ai_api_key VARCHAR(255),
+            ai_base_url VARCHAR(255)
+          )
+        `);
+        console.log("✅ Table created");
+      }
 
-      // 2. REFRESH schema - for new collection
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await database.raw(`
+        INSERT IGNORE INTO directus_collections (collection, icon, note, singleton)
+        VALUES ('ai_agent_settings', 'settings', 'AI Agent settings - Please restart Directus to see fields', true)
+      `);
 
-      // 3. Create FieldsService with FRESH schema
-      const freshSchema = await getSchema();
-      const fieldsService = new FieldsService({
-        schema: freshSchema,
-      });
+      const fields = [
+        ["id", "primary", "input", 1],
+        ["directus_url", null, "input", 2],
+        ["admin_token", null, "input", 3],
+        ["ai_model", null, "input", 4],
+        ["ai_api_key", null, "input", 5],
+        ["ai_base_url", null, "input", 6],
+      ];
 
-      await fieldsService.createField("ai_agent_settings", {
-        field: "directus_url",
-        type: "string",
-        schema: { default_value: "http://localhost:8055" },
-        meta: { interface: "input" },
-      });
+      for (const [field, special, iface, sort] of fields) {
+        await database.raw(
+          `
+          INSERT IGNORE INTO directus_fields (
+            collection,
+            field,
+            special,
+            interface,
+            options,
+            display,
+            display_options,
+            readonly,
+            hidden,
+            sort,
+            width,
+            translations,
+            note,
+            conditions,
+            required,
+            \`group\`,
+            validation,
+            validation_message
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+          [
+            "ai_agent_settings",
+            field,
+            special,
+            iface,
+            null,
+            null,
+            null,
+            false,
+            false,
+            sort,
+            "full",
+            null,
+            null,
+            null,
+            false,
+            null,
+            null,
+            null,
+          ]
+        );
+      }
 
-      await fieldsService.createField("ai_agent_settings", {
-        field: "admin_token",
-        type: "text",
-        meta: { interface: "input" },
-      });
+      const existing = await database.raw(
+        `SELECT COUNT(*) as count FROM ai_agent_settings`
+      );
+      if (existing[0][0].count === 0) {
+        await database.raw(
+          `
+          INSERT INTO ai_agent_settings (directus_url, ai_model, ai_base_url)
+          VALUES (?, ?, ?)
+        `,
+          [
+            "http://localhost:8055",
+            "gpt-3.5-turbo",
+            "https://api.openai.com/v1",
+          ]
+        );
+        console.log("✅ Default settings inserted");
+      }
 
-      await fieldsService.createField("ai_agent_settings", {
-        field: "ai_model",
-        type: "string",
-        schema: { default_value: "gpt-3.5-turbo" },
-        meta: { interface: "input" },
-      });
-
-      await fieldsService.createField("ai_agent_settings", {
-        field: "ai_api_key",
-        type: "string",
-        meta: { interface: "input" },
-      });
-
-      await fieldsService.createField("ai_agent_settings", {
-        field: "ai_base_url",
-        type: "string",
-        schema: { default_value: "https://api.openai.com/v1" },
-        meta: { interface: "input" },
-      });
-
-      console.log("✅ Fields created");
-      console.log("🎉 Settings table complete!");
+      console.log("🎉 Table and Directus metadata setup complete");
       tableCreated = true;
-    } catch (error) {
-      console.error("❌ Table creation error:", error.message);
-      // Continue even if error occurs
+      const utils = new UtilsService({
+        schema: await getSchema(),
+        accountability: { role: "admin", admin: true },
+      });
+      console.log(utils);
+      const result = await utils.clearCache({ system: true });
+      console.log(result);
+    } catch (e) {
+      console.error("❌ Table setup failed:", e);
     }
   }
 
