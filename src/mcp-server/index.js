@@ -18,7 +18,7 @@ export default (router, context) => {
   let utils = null;
   let openaiClient = null;
   let mcpClient = null;
-
+  let agentService = null;
   const initializeServices = async () => {
     agentService = new ItemsService("ai_agent_settings", {
       schema: await getSchema(),

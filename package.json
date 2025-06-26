@@ -2,7 +2,7 @@
   "name": "directus-extension-ai-agent",
   "description": "Transform your Directus CMS with intelligent automation, smart data interpretation, and natural language processing.",
   "icon": "extension",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "license": "GPL-3.0-or-later",
   "keywords": [
     "directus",
