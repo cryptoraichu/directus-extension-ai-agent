@@ -1,485 +1,54 @@
-import { spawn } from "child_process";
 import directusTools from "./directusTools.js";
-
-let openaiClient = null;
-let mcpClient = null;
-let currentSettings = null;
-
-// OpenAI Client
-class OpenAI {
-  constructor({ apiKey, baseURL = "https://api.openai.com/v1" }) {
-    this.apiKey = apiKey;
-    this.baseURL = baseURL;
-  }
-
-  async chat(options) {
-    const fetch = (await import("node-fetch")).default;
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(options),
-    });
-
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
-    }
-
-    return await response.json();
-  }
-}
-
-// MCP Client Class
-class MCPClient {
-  constructor() {
-    this.nextId = 1;
-    this.pendingRequests = new Map();
-    this.child = null;
-    this.initialized = false;
-  }
-
-  async connect(directusUrl, directusToken) {
-    return new Promise((resolve, reject) => {
-      // Admin token check
-      if (!directusToken || directusToken.trim() === "") {
-        console.error("❌ Admin token is empty! MCP won't work.");
-        reject(new Error("Admin token is required"));
-        return;
-      }
-
-      const env = {
-        ...process.env,
-        DIRECTUS_URL: directusUrl,
-        DIRECTUS_TOKEN: directusToken,
-      };
-
-      console.log(
-        `🔧 MCP connecting with URL: ${directusUrl}, Token: ${
-          directusToken
-            ? "SET (" + directusToken.substring(0, 10) + "...)"
-            : "NOT SET"
-        }`
-      );
-
-      this.child = spawn("npx", ["@directus/content-mcp@latest"], {
-        stdio: ["pipe", "pipe", "pipe"],
-        env,
-        shell: true,
-        cwd: process.cwd(),
-      });
-
-      let buffer = "";
-      let initTimeout;
-
-      this.child.stdout.on("data", (data) => {
-        buffer += data.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-
-        lines.forEach((line) => {
-          if (line.trim()) {
-            try {
-              const message = JSON.parse(line);
-              console.log("MCP Response:", message);
-              this.handleMessage(message);
-            } catch (err) {
-              console.log("MCP stdout:", line); // For non-JSON outputs
-            }
-          }
-        });
-      });
-
-      this.child.stderr.on("data", (data) => {
-        const errorMsg = data.toString();
-        console.error("MCP stderr:", errorMsg);
-
-        // If there's a fatal error, reject
-        if (errorMsg.includes("Fatal error") || errorMsg.includes("ZodError")) {
-          clearTimeout(initTimeout);
-          reject(new Error("MCP Fatal Error: " + errorMsg));
-        }
-      });
-
-      this.child.on("error", (error) => {
-        console.error("MCP process error:", error);
-        clearTimeout(initTimeout);
-        reject(error);
-      });
-
-      this.child.on("close", (code) => {
-        console.log(`MCP process closed with code ${code}`);
-        if (code !== 0 && !this.initialized) {
-          clearTimeout(initTimeout);
-          reject(new Error(`MCP process exited with code ${code}`));
-        }
-      });
-
-      // Initialize timeout
-      initTimeout = setTimeout(async () => {
-        try {
-          console.log("🚀 Initializing MCP...");
-          await this.sendRequest("initialize", {
-            protocolVersion: "2024-11-05",
-            capabilities: {},
-            clientInfo: {
-              name: "directus-extension-ai-agent",
-              version: "1.0.0",
-            },
-          });
-          this.initialized = true;
-          console.log("✅ MCP initialized successfully");
-          resolve();
-        } catch (error) {
-          console.error("❌ MCP initialization error:", error);
-          reject(error);
-        }
-      }, 3000); // Wait 3 seconds
-    });
-  }
-
-  async sendRequest(method, params = {}) {
-    if (!this.child || !this.child.stdin) {
-      throw new Error("MCP client not connected");
-    }
-
-    const id = this.nextId++;
-    const request = {
-      jsonrpc: "2.0",
-      id,
-      method,
-      params,
-    };
-
-    console.log("MCP Request:", request);
-
-    return new Promise((resolve, reject) => {
-      // Increase timeout to 30 seconds
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        console.error(`❌ MCP Request timeout for ${method}`);
-        reject(new Error(`Request timeout for ${method}`));
-      }, 30000);
-
-      this.pendingRequests.set(id, { resolve, reject, timeout });
-
-      try {
-        this.child.stdin.write(JSON.stringify(request) + "\n");
-      } catch (error) {
-        clearTimeout(timeout);
-        this.pendingRequests.delete(id);
-        reject(error);
-      }
-    });
-  }
-
-  handleMessage(message) {
-    if (message.id && this.pendingRequests.has(message.id)) {
-      const { resolve, reject, timeout } = this.pendingRequests.get(message.id);
-      clearTimeout(timeout);
-      this.pendingRequests.delete(message.id);
-
-      if (message.error) {
-        console.error("❌ MCP Error Response:", message.error);
-        reject(
-          new Error(message.error.message || JSON.stringify(message.error))
-        );
-      } else {
-        resolve(message.result);
-      }
-    }
-  }
-
-  async callTool(name, args) {
-    if (!this.initialized) {
-      throw new Error("MCP client not initialized");
-    }
-
-    console.log(`🔧 Calling tool: ${name} with args:`, args);
-
-    try {
-      const result = await this.sendRequest("tools/call", {
-        name,
-        arguments: args,
-      });
-
-      console.log(
-        `✅ Tool ${name} result:`,
-        JSON.stringify(result).substring(0, 200)
-      );
-      return result;
-    } catch (error) {
-      console.error(`❌ Tool ${name} error:`, error.message);
-      throw error;
-    }
-  }
-
-  disconnect() {
-    if (this.child) {
-      console.log("🔌 Disconnecting MCP");
-      this.child.kill();
-      this.child = null;
-      this.initialized = false;
-      this.pendingRequests.clear();
-    }
-  }
-}
-
-// Helper functions
-function fixParameters(toolName, args) {
-  if (toolName === "read-items" && !args.query) {
-    const { collection, ...queryParams } = args;
-    return { collection, query: queryParams };
-  }
-  return args;
-}
-
-function processResult(rawResult) {
-  try {
-    if (rawResult.isError) {
-      return {
-        success: false,
-        error: "Tool failed",
-        details: rawResult.content,
-      };
-    }
-
-    if (rawResult.content && Array.isArray(rawResult.content)) {
-      const textContent = rawResult.content.find((c) => c.type === "text");
-      if (textContent) {
-        const dataMatch = textContent.text.match(/<data>(.*?)<\/data>/s);
-        if (dataMatch) {
-          try {
-            const data = JSON.parse(dataMatch[1]);
-
-            if (Array.isArray(data) && data.length > 0) {
-              const firstRecord = data[0];
-              const extractedId = firstRecord.id || firstRecord.ID;
-              return {
-                success: true,
-                data: data,
-                extracted_id: extractedId,
-                message: extractedId
-                  ? `ID: ${extractedId} extracted`
-                  : "Data retrieved",
-              };
-            }
-
-            return { success: true, data: data };
-          } catch (e) {
-            return { success: true, data: textContent.text };
-          }
-        }
-      }
-    }
-
-    return { success: true, data: rawResult };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}
-
-async function executeManualToolCall(content) {
-  try {
-    const readItemsMatch = content.match(
-      /read-items.*collection[:\s]*["'](\w+)["']/i
-    );
-    const createItemMatch = content.match(
-      /create-item.*collection[:\s]*["'](\w+)["']/i
-    );
-
-    if (readItemsMatch) {
-      const collection = readItemsMatch[1];
-      console.log(`🔧 Manual read-items: ${collection}`);
-
-      const result = await mcpClient.callTool("read-items", {
-        collection,
-        query: { sort: ["-id"], limit: 1 },
-      });
-
-      return processResult(result);
-    }
-
-    if (createItemMatch) {
-      console.log(`🔧 Manual create-item detected but needs more params`);
-      return { message: "create-item parameters missing" };
-    }
-
-    return null;
-  } catch (error) {
-    console.error("Manual execution error:", error);
-    return null;
-  }
-}
+import MCPClient from "./classes/MCPClient.js";
+import OpenAI from "./classes/OpenAI.js";
+import {
+  createSettingsTable,
+  executeManualToolCall,
+  fixParameters,
+  loadSettings,
+  processResult,
+} from "./functions.js";
 
 export default (router, context) => {
   const { services, getSchema, database } = context;
   const { ItemsService, UtilsService } = services;
+
   let initPromise = null;
-  let tableCreated = false; // Flag to create only once
+  let tableCreated = false;
+  let utils = null;
+  let openaiClient = null;
+  let mcpClient = null;
 
-  // Settings loading
-  async function loadSettings() {
-    try {
-      const itemsService = new ItemsService("ai_agent_settings", {
-        schema: await getSchema(),
-      });
+  const initializeServices = async () => {
+    agentService = new ItemsService("ai_agent_settings", {
+      schema: await getSchema(),
+    });
+    utils = new UtilsService({
+      schema: await getSchema(),
+      accountability: { role: "admin", admin: true },
+    });
 
-      const settings = await itemsService.readByQuery({ limit: 1 });
+    await createSettingsTable(tableCreated, database, utils);
+  };
 
-      if (settings.length > 0) {
-        currentSettings = settings[0];
-        console.log("✅ Settings loaded");
-        return currentSettings;
-      }
-    } catch (error) {
-      console.log("Settings table doesn't exist, using defaults");
+  initializeServices().catch(console.error);
+
+  async function ensureMCPConnection(database, utils) {
+    if (!database || !utils) {
+      await initializeServices();
     }
 
-    // Default settings
-    currentSettings = {
-      directus_url: "http://localhost:8055",
-      admin_token: "",
-      ai_model: "gpt-3.5-turbo",
-      ai_base_url: "https://api.openai.com/v1",
-      ai_api_key: "",
-    };
-    return currentSettings;
-  }
-  async function createSettingsTable() {
-    if (tableCreated) return;
+    // RAW SQL İLE LOAD ET - ItemsService değil
+    let currentSettings = await loadSettings(database); // database parametresi geç
 
-    console.log("🔧 Creating settings table with raw SQL...");
+    console.log("🔍 Current settings check:", {
+      has_settings: !!currentSettings,
+      has_token: !!currentSettings?.admin_token,
+      token_length: currentSettings?.admin_token?.length || 0,
+    });
 
-    try {
-      const tableExists = await database.raw(`
-        SELECT COUNT(*) as count 
-        FROM information_schema.tables 
-        WHERE table_schema = DATABASE() 
-        AND table_name = 'ai_agent_settings'
-      `);
-
-      if (tableExists[0][0].count > 0) {
-        console.log("✅ Settings table already exists");
-      } else {
-        await database.raw(`
-          CREATE TABLE IF NOT EXISTS ai_agent_settings (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            directus_url VARCHAR(255),
-            admin_token TEXT,
-            ai_model VARCHAR(100),
-            ai_api_key VARCHAR(255),
-            ai_base_url VARCHAR(255)
-          )
-        `);
-        console.log("✅ Table created");
-      }
-
-      await database.raw(`
-        INSERT IGNORE INTO directus_collections (collection, icon, note, singleton)
-        VALUES ('ai_agent_settings', 'settings', 'AI Agent settings - Please restart Directus to see fields', true)
-      `);
-
-      const fields = [
-        ["id", "primary", "input", 1],
-        ["directus_url", null, "input", 2],
-        ["admin_token", null, "input", 3],
-        ["ai_model", null, "input", 4],
-        ["ai_api_key", null, "input", 5],
-        ["ai_base_url", null, "input", 6],
-      ];
-
-      for (const [field, special, iface, sort] of fields) {
-        await database.raw(
-          `
-          INSERT IGNORE INTO directus_fields (
-            collection,
-            field,
-            special,
-            interface,
-            options,
-            display,
-            display_options,
-            readonly,
-            hidden,
-            sort,
-            width,
-            translations,
-            note,
-            conditions,
-            required,
-            \`group\`,
-            validation,
-            validation_message
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-          [
-            "ai_agent_settings",
-            field,
-            special,
-            iface,
-            null,
-            null,
-            null,
-            false,
-            false,
-            sort,
-            "full",
-            null,
-            null,
-            null,
-            false,
-            null,
-            null,
-            null,
-          ]
-        );
-      }
-
-      const existing = await database.raw(
-        `SELECT COUNT(*) as count FROM ai_agent_settings`
-      );
-      if (existing[0][0].count === 0) {
-        await database.raw(
-          `
-          INSERT INTO ai_agent_settings (directus_url, ai_model, ai_base_url)
-          VALUES (?, ?, ?)
-        `,
-          [
-            "http://localhost:8055",
-            "gpt-3.5-turbo",
-            "https://api.openai.com/v1",
-          ]
-        );
-        console.log("✅ Default settings inserted");
-      }
-
-      console.log("🎉 Table and Directus metadata setup complete");
-      tableCreated = true;
-      const utils = new UtilsService({
-        schema: await getSchema(),
-        accountability: { role: "admin", admin: true },
-      });
-      console.log(utils);
-      const result = await utils.clearCache({ system: true });
-      console.log(result);
-    } catch (e) {
-      console.error("❌ Table setup failed:", e);
-    }
-  }
-
-  // AUTO CREATE WHEN APP STARTS
-  createSettingsTable();
-
-  // MCP connection - Fixed
-  async function ensureMCPConnection() {
-    await loadSettings();
-
-    // Admin token check
     if (
-      !currentSettings.admin_token ||
+      !currentSettings?.admin_token ||
       currentSettings.admin_token.trim() === ""
     ) {
       throw new Error("Admin token not set! Please go to settings.");
@@ -508,12 +77,20 @@ export default (router, context) => {
         throw error;
       }
     }
+
+    return currentSettings;
   }
 
-  // API Routes
   router.get("/settings", async (req, res) => {
     try {
-      const settings = await loadSettings();
+      if (req.accountability.admin !== true) {
+        return res.status(403).json({
+          success: false,
+          error: "Admin access required to view settings",
+        });
+      }
+
+      const settings = await loadSettings(database);
       res.json({ success: true, data: settings });
     } catch (error) {
       console.error("Settings error:", error);
@@ -523,19 +100,20 @@ export default (router, context) => {
 
   router.post("/settings", async (req, res) => {
     try {
-      const itemsService = new ItemsService("ai_agent_settings", {
+      const freshItemsService = new ItemsService("ai_agent_settings", {
         schema: await getSchema(),
+        accountability: req.accountability,
       });
 
-      const existing = await itemsService.readByQuery({ limit: 1 });
+      const existing = await freshItemsService.readByQuery({ limit: 1 });
 
       if (existing.length > 0) {
-        await itemsService.updateOne(existing[0].id, req.body);
+        await freshItemsService.updateOne(existing[0].id, req.body);
       } else {
-        await itemsService.createOne(req.body);
+        await freshItemsService.createOne(req.body);
       }
 
-      // Restart MCP
+      // GLOBAL SETTINGS'İ TEMİZLE - YENİDEN YÜKLENECEK
       if (mcpClient?.initialized) {
         mcpClient.disconnect();
         initPromise = null;
@@ -548,8 +126,13 @@ export default (router, context) => {
     }
   });
 
-  // Main prompt endpoint
   router.post("/prompt", async (req, res) => {
+    if (req.accountability.admin !== true) {
+      return res.status(403).json({
+        success: false,
+        error: "Admin access required to use AI Agent",
+      });
+    }
     try {
       const { prompt } = req.body;
 
@@ -562,8 +145,14 @@ export default (router, context) => {
 
       console.log("User Prompt:", prompt);
 
-      // Load settings and start MCP
-      await ensureMCPConnection();
+      let currentSettings = await ensureMCPConnection(database, utils);
+
+      if (!currentSettings) {
+        return res.status(500).json({
+          success: false,
+          error: "Failed to load settings",
+        });
+      }
 
       if (!currentSettings.ai_api_key) {
         return res.status(400).json({
@@ -572,7 +161,6 @@ export default (router, context) => {
         });
       }
 
-      // Initialize OpenAI client from settings
       openaiClient = new OpenAI({
         apiKey: currentSettings.ai_api_key,
         baseURL: currentSettings.ai_base_url || "https://api.openai.com/v1",
@@ -582,30 +170,30 @@ export default (router, context) => {
         role: "system",
         content: `You are a Directus CMS expert. MANDATORY OPERATION ORDER:
 
-1️⃣ read-collections → What collections exist?
-2️⃣ read-fields collection="X" → What fields does collection X have?
-3️⃣ Perform operation based on fields
+    1️⃣ read-collections → What collections exist?
+    2️⃣ read-fields collection="X" → What fields does collection X have?
+    3️⃣ Perform operation based on fields
 
-🔧 CREATE/UPDATE RULES:
-- NEVER guess fields!
-- First learn real fields with read-fields
-- Only use existing fields
-- Always fill mandatory fields
+        🔧 CREATE/UPDATE RULES:
+    - NEVER guess fields!
+    - First learn real fields with read-fields
+    - Only use existing fields
+    - Always fill mandatory fields
 
-🎯 TOOL ORDER:
-❌ WRONG: create-item → error
-✅ CORRECT: read-collections → read-fields → create-item
+    🎯 TOOL ORDER:
+    ❌ WRONG: create-item → error
+    ✅ CORRECT: read-collections → read-fields → create-item
 
-💡 SMART LOGIC:
-- "Add new X" → read-fields collection="X" → create-item with real fields
-- "Link to latest Y" → read-items collection="Y" → get ID → use in create-item
-- "Update Z" → read-fields collection="Z" → update-item
+    💡 SMART LOGIC:
+    - "Add new X" → read-fields collection="X" → create-item with real fields
+    - "Link to latest Y" → read-items collection="Y" → get ID → use in create-item
+    - "Update Z" → read-fields collection="Z" → update-item
 
-📋 FORMAT:
-read-items: {"collection": "X", "query": {"sort": ["-id"], "limit": 1}}
-read-fields: {"collection": "X"}
+    📋 FORMAT:
+    read-items: {"collection": "X", "query": {"sort": ["-id"], "limit": 1}}
+    read-fields: {"collection": "X"}
 
-START WITH: read-collections!`,
+    START WITH: read-collections!`,
       };
 
       let conversation = [systemMessage, { role: "user", content: prompt }];
@@ -776,14 +364,5 @@ START WITH: read-collections!`,
         error: error.message,
       });
     }
-  });
-
-  // Health check
-  router.get("/health", (req, res) => {
-    res.status(200).json({
-      status: "ok",
-      mcp_connected: mcpClient?.initialized || false,
-      settings_loaded: currentSettings ? true : false,
-    });
   });
 };
