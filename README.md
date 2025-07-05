@@ -49,7 +49,7 @@ npm install directus-extension-ai-agent
 Or clone manually:
 
 ```
-git clone https://github.com/uncw3b/directus-extension-ai-agent
+git clone https://github.com/Uncw3b-Software/directus-extension-ai-agent
 ```
 
 ---
